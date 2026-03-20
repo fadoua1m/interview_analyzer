@@ -1,10 +1,7 @@
 import { useState, useEffect } from "react";
-import { useCreateJob, useUpdateJob } from "../../hooks/useJobs";
-import {
-  useEnhanceDescription,
+import { useCreateJob, useUpdateJob,useEnhanceDescription,
   useGenerateRequirements,
-  useEnhanceRequirements,
-} from "../../hooks/useAI";
+  useEnhanceRequirements, } from "../../hooks/useJobs";
 import {
   Dialog,
   DialogContent,

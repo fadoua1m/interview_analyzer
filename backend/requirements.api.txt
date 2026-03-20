@@ -7,3 +7,5 @@ pydantic-settings
 python-multipart
 supabase
 google-genai
+groq
+sentance-transformers

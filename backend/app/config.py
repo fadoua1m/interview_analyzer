@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     supabase_url:         str
     supabase_service_key: str
     gemini_api_key:       str
+    groq_api_key:         str
     app_env:              str = "development"
     cors_origins:         str = "http://localhost:5173"
 

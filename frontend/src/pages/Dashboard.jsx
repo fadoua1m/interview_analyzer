@@ -32,7 +32,6 @@ function StatCard({ icon: Icon, label, value, sub, color, loading, comingSoon })
       "bg-white rounded-2xl border border-slate-200 p-5 flex flex-col gap-3 shadow-sm",
       "hover:shadow-md transition-shadow duration-200 relative overflow-hidden"
     )}>
-      {/* Background accent */}
       <div className={cn("absolute top-0 right-0 w-20 h-20 rounded-full opacity-5 -translate-y-6 translate-x-6", color)} />
 
       <div className="flex items-start justify-between">
@@ -134,21 +133,11 @@ export default function Dashboard() {
     <div className="space-y-6 max-w-6xl mx-auto">
 
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          </p>
-        </div>
-        <Button
-          size="sm"
-          onClick={() => navigate("/jobs")}
-          className="bg-slate-900 hover:bg-slate-700 text-white gap-1.5 text-xs h-8 px-3"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Add Job
-        </Button>
+      <div>
+        <h1 className="text-xl font-bold text-slate-900 tracking-tight">Dashboard</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+        </p>
       </div>
 
       {/* Stats grid */}
@@ -259,7 +248,6 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Coming soon placeholder */}
           <div className="mx-5 mb-5 rounded-xl bg-slate-50 border border-dashed border-slate-200 px-4 py-4 text-center">
             <p className="text-xs font-medium text-slate-400">More analytics coming soon</p>
             <p className="text-[11px] text-slate-300 mt-0.5">Match scores · Interview tracking</p>
