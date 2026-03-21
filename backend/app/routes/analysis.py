@@ -34,6 +34,7 @@ def run_analysis_route(payload: AnalysisRequest):
             "overall_score": report.overall_score,
             "relevance":     report.relevance.model_dump(),
             "soft_skills":   report.soft_skills.model_dump(),
+            "video":         report.video.model_dump() if report.video else None,
             "generated_at":  report.generated_at.isoformat(),
         }).execute()
     except Exception:
@@ -47,12 +48,6 @@ def run_analysis_upload(
     video:        UploadFile = File(...),
     interview_id: str        = Form(...),
 ):
-    """
-    Upload a video file directly for testing.
-    interview_id must be a valid UUID from your interviews table.
-    Questions are fetched automatically from the database.
-    """
-    # fetch interview + questions from DB
     interview_row = (
         supabase.table("interviews")
         .select("id")
@@ -64,26 +59,23 @@ def run_analysis_upload(
 
     questions_row = (
         supabase.table("interview_questions")
-        .select("id, question, rubric, target_skills")
+        .select("id, question, rubric")
         .eq("interview_id", interview_id)
         .order("order_index", desc=False)
         .execute()
     )
-
     if not questions_row.data:
-        raise HTTPException(400, "This interview has no questions. Add at least one question first.")
+        raise HTTPException(400, "This interview has no questions.")
 
     questions = [
         QuestionInput(
-            id=            row["id"],
-            text=          row["question"],
-            rubric=        row.get("rubric"),
-            target_skills= row.get("target_skills") or [],
+            id=    row["id"],
+            text=  row["question"],
+            rubric=row.get("rubric"),
         )
         for row in questions_row.data
     ]
 
-    # save uploaded video to a temp file
     suffix = Path(video.filename).suffix or ".mp4"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(video.file, tmp)
@@ -109,6 +101,7 @@ def run_analysis_upload(
             "overall_score": report.overall_score,
             "relevance":     report.relevance.model_dump(),
             "soft_skills":   report.soft_skills.model_dump(),
+            "video":         report.video.model_dump() if report.video else None,
             "generated_at":  report.generated_at.isoformat(),
         }, on_conflict="interview_id").execute()
     except Exception:

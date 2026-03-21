@@ -9,12 +9,22 @@ from app.routes.analysis        import router as analysis_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import sys
     from app.analysis_pipeline.text.helpers import load_embedder, load_nli
-    print("[Startup] Loading MiniLM embedder...")
+
+    print("[Startup] Loading text models...")
     load_embedder()
-    print("[Startup] Loading DeBERTa NLI...")
     load_nli()
-    print("[Startup] Models ready")
+
+    print("[Startup] Loading video models...")
+    try:
+        from app.analysis_pipeline.video.face_analyser import _load_models
+        _load_models()
+        print("[Startup] Video models ready")
+    except Exception as e:
+        print(f"[Startup] Video models failed: {e} — video module disabled")
+
+    print("[Startup] Ready")
     yield
 
 

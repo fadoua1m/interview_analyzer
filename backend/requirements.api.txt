@@ -8,4 +8,7 @@ python-multipart
 supabase
 google-genai
 groq
-sentance-transformers
+opencv-python
+openface-test
+Pillow
+huggingface-hub

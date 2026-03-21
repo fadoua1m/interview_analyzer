@@ -54,10 +54,29 @@ class SoftSkillsResult(BaseModel):
     summary:  str
 
 
+class VideoResult(BaseModel):
+    engagement_score:     float
+    gaze_score:           float
+    dominant_emotion:     str
+    emotion_distribution: dict[str, float]
+    genuine_smile_pct:    float
+    concern_pct:          float
+    sadness_pct:          float
+    nervous_pct:          float
+    face_detected_pct:    float
+    temporal_trend:       dict[str, float]
+    stability_score:      float
+    confidence_score:     float
+    insights:             dict[str, list[str]]
+    reliable:             bool
+ 
+
+
 class CandidateReport(BaseModel):
     interview_id:       str
     relevance:          RelevanceResult
     soft_skills:        SoftSkillsResult
+    video:              VideoResult | None = None
     overall_score:      float
     generated_at:       datetime
     transcript_preview: str = ""

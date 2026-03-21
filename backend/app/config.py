@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     supabase_service_key: str
     gemini_api_key:       str
     groq_api_key:         str
+    openface_weights_dir: str
     app_env:              str = "development"
     cors_origins:         str = "http://localhost:5173"
 
