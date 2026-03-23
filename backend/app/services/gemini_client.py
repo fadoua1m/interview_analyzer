@@ -2,7 +2,7 @@ from google import genai
 from google.genai import types
 from app.config import settings
 
-MODEL = "gemini-2.0-flash"
+MODEL = "gemini-2.5-flash"
 
 
 def generate(prompt: str) -> str:

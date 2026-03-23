@@ -59,17 +59,18 @@ class VideoResult(BaseModel):
     gaze_score:           float
     dominant_emotion:     str
     emotion_distribution: dict[str, float]
+    positivity_ratio:     float
+    smile_pct:            float
     genuine_smile_pct:    float
     concern_pct:          float
     sadness_pct:          float
     nervous_pct:          float
     face_detected_pct:    float
-    temporal_trend:       dict[str, float]
+    temporal_trend:       dict[str, float | str]
     stability_score:      float
     confidence_score:     float
     insights:             dict[str, list[str]]
     reliable:             bool
- 
 
 
 class CandidateReport(BaseModel):
