@@ -72,12 +72,13 @@ def transcribe(video_path: str) -> dict:
                 language=       "en",
                 temperature=    0.0,
             )
-    finally:
+    except Exception:
         if is_temp:
             try:
                 os.unlink(audio_path)
             except OSError:
                 pass
+        raise
 
     raw_text   = response.text
     clean_text = clean_transcript(raw_text)
@@ -92,4 +93,7 @@ def transcribe(video_path: str) -> dict:
             {"start": seg["start"], "end": seg["end"], "text": seg["text"]}
             for seg in (response.segments or [])
         ],
+        "audio_path": audio_path,
+        "audio_is_temp": is_temp,
+
     }

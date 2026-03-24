@@ -84,7 +84,35 @@ Return ONLY valid JSON:
 }}"""
 
 
+def _is_unusable_answer(answer: str) -> bool:
+    text = (answer or "").strip()
+    if not text:
+        return True
+    if text == "[No answer extracted]":
+        return True
+    return len(text.split()) < 6
+
+
+def _clamp_score(value: float) -> float:
+    return max(0.0, min(10.0, value))
+
+
+def _to_score(data: dict, key: str) -> float:
+    try:
+        return _clamp_score(float(data.get(key, 0)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _score_one(pair: QAPair) -> QuestionScore:
+    if _is_unusable_answer(pair.answer):
+        return QuestionScore(
+            question=pair.question,
+            score=0.0,
+            band=None,
+            reason="Insufficient answer extracted for reliable scoring.",
+        )
+
     prompt = (
         _PROMPT_WITH_RUBRIC.format(
             question=pair.question,
@@ -107,9 +135,9 @@ def _score_one(pair: QAPair) -> QuestionScore:
             print(f"[Relevance] FAILED for '{pair.question[:50]}': {e}")
             return QuestionScore(
                 question=pair.question,
-                score=   5.0,
+                score=   2.0,
                 band=    None,
-                reason=  "Scoring failed — defaulting to neutral score.",
+                reason=  "Scoring failed — low-confidence fallback applied.",
             )
 
     r = data.get("reasoning", {})
@@ -119,16 +147,16 @@ def _score_one(pair: QAPair) -> QuestionScore:
     # final score computed in Python — not by the LLM
     if pair.rubric:
         final = round(
-            float(data.get("content_score",   5)) * 0.4 +
-            float(data.get("structure_score", 5)) * 0.3 +
-            float(data.get("rubric_score",    5)) * 0.3,
+            _to_score(data, "content_score") * 0.4 +
+            _to_score(data, "structure_score") * 0.3 +
+            _to_score(data, "rubric_score") * 0.3,
             1,
         )
     else:
         final = round(
-            float(data.get("content_score",   5)) * 0.5 +
-            float(data.get("structure_score", 5)) * 0.3 +
-            float(data.get("clarity_score",   5)) * 0.2,
+            _to_score(data, "content_score") * 0.5 +
+            _to_score(data, "structure_score") * 0.3 +
+            _to_score(data, "clarity_score") * 0.2,
             1,
         )
 

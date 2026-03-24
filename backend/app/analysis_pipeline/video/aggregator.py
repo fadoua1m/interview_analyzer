@@ -1,3 +1,5 @@
+import json
+import os
 import numpy as np
 
 
@@ -40,6 +42,35 @@ AU_THRESHOLD = {
 
 CONFIDENCE_THRESHOLD = 0.5
 GAZE_MAX_DEVIATION   = 0.5
+
+
+def _load_calibration_map() -> dict:
+    raw = os.getenv("VIDEO_SCORE_CALIBRATION_JSON", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        print("[Video] invalid VIDEO_SCORE_CALIBRATION_JSON; ignoring calibration")
+        return {}
+
+
+def _apply_calibration(value: float, key: str, default_min: float = 0.0, default_max: float = 10.0) -> float:
+    calibration = _load_calibration_map().get(key, {})
+    if not isinstance(calibration, dict):
+        return round(max(default_min, min(default_max, value)), 2)
+
+    scale = calibration.get("scale", 1.0)
+    bias = calibration.get("bias", 0.0)
+    min_v = calibration.get("min", default_min)
+    max_v = calibration.get("max", default_max)
+
+    try:
+        adjusted = value * float(scale) + float(bias)
+        return round(max(float(min_v), min(float(max_v), adjusted)), 2)
+    except (TypeError, ValueError):
+        return round(max(default_min, min(default_max, value)), 2)
 
 
 def filter_quality(frame_results: list[dict]) -> list[dict]:
@@ -119,7 +150,8 @@ def compute_gaze_score(frame_results: list[dict]) -> float:
     if not deviations:
         return 5.0
     mean_dev = float(np.mean(deviations))
-    return round(max(0.0, 1.0 - mean_dev / GAZE_MAX_DEVIATION) * 10, 2)
+    raw_score = max(0.0, 1.0 - mean_dev / GAZE_MAX_DEVIATION) * 10
+    return _apply_calibration(raw_score, "gaze")
 
 
 def compute_au_signals(
@@ -209,7 +241,7 @@ def compute_confidence_score(
         nervous_penalty    * 0.10
     ) * 10
 
-    return round(max(0.0, min(10.0, score)), 2)
+    return _apply_calibration(score, "confidence")
 
 
 def compute_temporal_trend(
@@ -264,7 +296,7 @@ def compute_engagement_score(
         nervous_penalty     * 0.05
     ) * 10
 
-    return round(max(0.0, min(10.0, score)), 2)
+    return _apply_calibration(score, "engagement")
 
 
 def compute_interview_insights(

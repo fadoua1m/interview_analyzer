@@ -72,13 +72,19 @@ class VideoResult(BaseModel):
     insights:             dict[str, list[str]]
     reliable:             bool
 
+class AudioResult(BaseModel):
+    fluency: dict
+    prosody: dict
+    accuracy: dict
+    completeness: dict
+    overall: float
 
 class CandidateReport(BaseModel):
     interview_id:       str
     relevance:          RelevanceResult
     soft_skills:        SoftSkillsResult
     video:              VideoResult | None = None
-    overall_score:      float
+    audio:              AudioResult | None = None
     generated_at:       datetime
     transcript_preview: str = ""
     qa_pairs_count:     int = 0

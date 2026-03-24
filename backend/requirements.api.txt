@@ -12,3 +12,10 @@ opencv-python
 openface-test
 Pillow
 huggingface-hub
+
+# --- Audio Intelligence Layer ---
+torch
+torchaudio
+transformers
+librosa
+numpy<2.0
