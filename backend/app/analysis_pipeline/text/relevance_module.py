@@ -1,87 +1,50 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from app.services.gemini_client import generate
+from app.services.groq_client import generate
 from app.schemas.analysis import QAPair, QuestionScore, RelevanceResult
-from app.analysis_pipeline.text.helpers import parse_json
+import re
 
 
-_PROMPT_WITH_RUBRIC = """You are a strict interview evaluator.
+_PROMPT = """You are an AI-powered interviewer assistant evaluating the relevance of an interview question.
 
-Question: {question}
+Task:
+- Determine how relevant the question is to assessing the candidate.
+- Use the provided candidate's answer to help contextualize the evaluation.
+- Provide a single numerical score (0-10) where:
+    - 0 = Completely irrelevant
+    - 10 = Highly relevant
 
-Rubric:
-{rubric}
+Interview Question:
+"{question}"
 
-Candidate's answer:
-{answer}
+Candidate's Answer:
+"{answer}"
 
-Score THREE dimensions separately then I will compute the final score.
-
-DIMENSION 1 — CONTENT (0-10):
-Did the candidate address the question?
-What specific element was missing from a complete answer?
-
-DIMENSION 2 — STRUCTURE (0-10):
-Is the answer organised with a clear flow?
-Or is it a disconnected list of facts?
-
-DIMENSION 3 — RUBRIC FIT (0-10):
-Which rubric band does the content fall into?
-Cite one specific thing from the answer that places it there.
-
-Return ONLY valid JSON:
-{{
-  "reasoning": {{
-    "content":   "<what they addressed and what was missing>",
-    "structure": "<organised or disconnected — one sentence>",
-    "rubric":    "<which band and one specific reason>"
-  }},
-  "content_score":   <0-10>,
-  "structure_score": <0-10>,
-  "rubric_score":    <0-10>,
-  "band":   "<band range only — e.g. 3-5>",
-  "reason": "<one sentence: the main strength and main weakness>"
-}}"""
+Output Format:
+Provide only a single number between 0 and 10 representing the relevance score.
+"""
 
 
-_PROMPT_NO_RUBRIC = """You are a strict interview evaluator.
+_PROMPT_RUBRIC_FIT = """You are an AI-powered interviewer assistant evaluating how well an answer matches a scoring rubric.
 
-Question: {question}
+Task:
+- Determine how well the candidate's answer matches the rubric criteria.
+- Provide a single numerical score (0-10) where:
+    - 0 = Does not satisfy rubric expectations
+    - 10 = Fully satisfies top rubric expectations
 
-Candidate's answer:
-{answer}
+Interview Question:
+"{question}"
 
-Score THREE dimensions separately then I will compute the final score.
+Scoring Rubric:
+"{rubric}"
 
-DIMENSION 1 — CONTENT (0-10):
-Did the candidate answer the question?
-0-2  = completely off topic
-3-5  = partial, key elements missing
-6-8  = mostly complete
-9-10 = complete with depth and specifics
+Candidate's Answer:
+"{answer}"
 
-DIMENSION 2 — STRUCTURE (0-10):
-Does the answer flow logically?
-Is there a clear beginning, substance, and conclusion?
-Or is it an unconnected list?
-
-DIMENSION 3 — CLARITY (0-10):
-Are key points stated clearly?
-Or buried in irrelevant detail?
-
-Return ONLY valid JSON:
-{{
-  "reasoning": {{
-    "content":   "<what they addressed and what was missing>",
-    "structure": "<organised or disconnected — one sentence>",
-    "clarity":   "<clear or unclear — one sentence>"
-  }},
-  "content_score":   <0-10>,
-  "structure_score": <0-10>,
-  "clarity_score":   <0-10>,
-  "band":   null,
-  "reason": "<one sentence: main strength and main weakness>"
-}}"""
+Output Format:
+Provide only a single number between 0 and 10 representing the rubric-fit score.
+"""
 
 
 def _is_unusable_answer(answer: str) -> bool:
@@ -97,11 +60,32 @@ def _clamp_score(value: float) -> float:
     return max(0.0, min(10.0, value))
 
 
-def _to_score(data: dict, key: str) -> float:
+def _parse_numeric_score(raw: str) -> float:
+    text = (raw or "").strip()
     try:
-        return _clamp_score(float(data.get(key, 0)))
-    except (TypeError, ValueError):
-        return 0.0
+        return _clamp_score(float(text))
+    except ValueError:
+        match = re.search(r"-?\d+(?:\.\d+)?", text)
+        if not match:
+            raise ValueError("No numeric relevance score found")
+        return _clamp_score(float(match.group(0)))
+
+
+def _score_relevance(pair: QAPair) -> float:
+    raw = generate(_PROMPT.format(question=pair.question, answer=pair.answer))
+    return round(_parse_numeric_score(raw), 1)
+
+
+def _score_rubric_fit(pair: QAPair) -> float | None:
+    rubric = (pair.rubric or "").strip()
+    if not rubric:
+        return None
+    raw = generate(_PROMPT_RUBRIC_FIT.format(
+        question=pair.question,
+        rubric=rubric,
+        answer=pair.answer,
+    ))
+    return round(_parse_numeric_score(raw), 1)
 
 
 def _score_one(pair: QAPair) -> QuestionScore:
@@ -113,58 +97,42 @@ def _score_one(pair: QAPair) -> QuestionScore:
             reason="Insufficient answer extracted for reliable scoring.",
         )
 
-    prompt = (
-        _PROMPT_WITH_RUBRIC.format(
-            question=pair.question,
-            rubric=pair.rubric,
-            answer=pair.answer,
-        )
-        if pair.rubric
-        else _PROMPT_NO_RUBRIC.format(
-            question=pair.question,
-            answer=pair.answer,
-        )
+    try:
+        relevance_score = _score_relevance(pair)
+        rubric_fit_score = _score_rubric_fit(pair)
+
+        if rubric_fit_score is None:
+            final = relevance_score
+        else:
+            final = round(0.5 * relevance_score + 0.5 * rubric_fit_score, 1)
+
+    except Exception as e:
+        print(f"[Relevance] FAILED for '{pair.question[:50]}': {e}")
+        relevance_score = 2.0
+        rubric_fit_score = None
+        final = 2.0
+
+    quality_label = (
+        "Responses were not relevant to the question."
+        if final < 4.5 else
+        "Responses were partially relevant to the question."
+        if final < 6.0 else
+        "Responses were relevant to the question."
     )
 
-    try:
-        data = parse_json(generate(prompt))
-    except Exception:
-        try:
-            data = parse_json(generate(prompt + "\n\nReturn ONLY the JSON object."))
-        except Exception as e:
-            print(f"[Relevance] FAILED for '{pair.question[:50]}': {e}")
-            return QuestionScore(
-                question=pair.question,
-                score=   2.0,
-                band=    None,
-                reason=  "Scoring failed — low-confidence fallback applied.",
-            )
-
-    r = data.get("reasoning", {})
-    print(f"[Relevance] content:   {r.get('content', '')}")
-    print(f"[Relevance] structure: {r.get('structure', '')}")
-
-    # final score computed in Python — not by the LLM
-    if pair.rubric:
-        final = round(
-            _to_score(data, "content_score") * 0.4 +
-            _to_score(data, "structure_score") * 0.3 +
-            _to_score(data, "rubric_score") * 0.3,
-            1,
-        )
+    if rubric_fit_score is None:
+        reason = f"Relevance {relevance_score:.1f}/10. {quality_label}"
     else:
-        final = round(
-            _to_score(data, "content_score") * 0.5 +
-            _to_score(data, "structure_score") * 0.3 +
-            _to_score(data, "clarity_score") * 0.2,
-            1,
+        reason = (
+            f"Relevance {relevance_score:.1f}/10, rubric fit {rubric_fit_score:.1f}/10, "
+            f"final {final:.1f}/10. {quality_label}"
         )
 
     return QuestionScore(
         question=pair.question,
         score=   final,
-        band=    data.get("band"),
-        reason=  data.get("reason", ""),
+        band=    None,
+        reason=  reason,
     )
 
 

@@ -1,6 +1,6 @@
 # app/services/interview_ai.py
 """AI generation and enhancement for interview questions."""
-from app.services.gemini_client import generate
+from app.services.groq_client import generate
 
 _TYPE_CONTEXT = {
     "behavioral": "behavioral questions about past experiences, teamwork, conflict, and leadership.",

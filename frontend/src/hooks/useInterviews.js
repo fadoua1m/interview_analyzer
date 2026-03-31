@@ -2,6 +2,19 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import client from "../api/client";
 
+function normalizeReportPayload(data = {}) {
+  return {
+    interview_id: data.interview_id ?? "",
+    hr_view: data.hr_view ?? {},
+    overall_score: Number(data.overall_score ?? 0),
+    decision: data.decision ?? "REVIEW",
+    decision_reasons: Array.isArray(data.decision_reasons) ? data.decision_reasons : [],
+    hr_summary: data.hr_summary ?? "",
+    generated_at: data.generated_at ?? null,
+    qa_pairs_count: Number(data.qa_pairs_count ?? 0),
+  };
+}
+
 // ── Interviews ───────────────────────────────────────────────────────────────
 
 export function useInterviews() {
@@ -40,7 +53,12 @@ export function useUpdateInterview() {
   return useMutation({
     mutationFn: ({ id, data }) =>
       client.patch(`/api/v1/interviews/${id}`, data).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["interviews"] }),
+    onSuccess: (_result, variables) => {
+      qc.invalidateQueries({ queryKey: ["interviews"] });
+      if (variables?.id) {
+        qc.invalidateQueries({ queryKey: ["interviews", variables.id] });
+      }
+    },
   });
 }
 
@@ -128,6 +146,69 @@ export function useEnhanceRubric(interviewId) {
         `/api/v1/interviews/${interviewId}/questions/${questionId}/ai/enhance-rubric`,
         payload
       ).then((r) => r.data.result),
+  });
+}
+
+
+export function useInterviewCandidates(interviewId) {
+  return useQuery({
+    queryKey: ["interviews", interviewId, "candidates"],
+    queryFn: () =>
+      client.get(`/api/v1/interviews/${interviewId}/candidates`).then((r) => r.data),
+    enabled: !!interviewId,
+  });
+}
+
+
+export function useAssignCandidate(interviewId) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) =>
+      client.post(`/api/v1/interviews/${interviewId}/candidates`, payload).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["interviews", interviewId, "candidates"] }),
+  });
+}
+
+
+export function useCandidateAccess(accessToken) {
+  return useQuery({
+    queryKey: ["candidate-access", accessToken],
+    queryFn: () =>
+      client.get(`/api/v1/interviews/candidate-access/${accessToken}`).then((r) => r.data),
+    enabled: !!accessToken,
+    retry: false,
+  });
+}
+
+
+export function useSubmitCandidateVideo(accessToken) {
+  return useMutation({
+    mutationFn: (file) => {
+      const formData = new FormData();
+      formData.append("video", file);
+      return client
+        .post(`/api/v1/interviews/candidate-access/${accessToken}/submit`, formData)
+        .then((r) => {
+          const payload = r.data || {};
+          return {
+            ...payload,
+            analysis: payload.analysis ? normalizeReportPayload(payload.analysis) : null,
+          };
+        });
+    },
+  });
+}
+
+
+export function useCandidateReport(interviewId, candidateId, enabled = true) {
+  return useQuery({
+    queryKey: ["interviews", interviewId, "candidates", candidateId, "report"],
+    queryFn: () =>
+      client
+        .get(`/api/v1/interviews/${interviewId}/candidates/${candidateId}/report`)
+        .then((r) => normalizeReportPayload(r.data || {})),
+    enabled: !!interviewId && !!candidateId && enabled,
+    retry: false,
   });
 }
 

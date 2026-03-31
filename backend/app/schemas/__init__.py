@@ -26,6 +26,16 @@ from app.schemas.analysis import (
     QuestionScore,
     RelevanceResult,
     DetectedSkill,
+    SoftSkillsResult,
+    VideoResult,
+    AudioResult,
+    CandidateReport,
+)
+from app.schemas.softskills import (
+    SoftSkillBankCreate,
+    SoftSkillBankUpdate,
+    SoftSkillBankResponse,
+    SoftSkillKeysResponse,
 )
 
 __all__ = [
@@ -52,5 +62,14 @@ __all__ = [
     "PreprocessingResult",
     "QuestionScore",
     "RelevanceResult",
-    "DetectedSkill",    
+    "DetectedSkill",
+    "SoftSkillsResult",
+    "VideoResult",
+    "AudioResult",
+    "CandidateReport",
+
+    "SoftSkillBankCreate",
+    "SoftSkillBankUpdate",
+    "SoftSkillBankResponse",
+    "SoftSkillKeysResponse",
 ]

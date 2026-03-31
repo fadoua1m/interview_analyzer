@@ -6,8 +6,6 @@ from functools import lru_cache
 import numpy as np
 from sentence_transformers import SentenceTransformer, CrossEncoder, util
 
-from app.constants.competencies import COMPETENCY_BANK
-
 
 # ── JSON parsing ──────────────────────────────────────────────────────────────
 
@@ -16,24 +14,35 @@ def parse_json(raw: str) -> dict | list:
     Strip markdown code fences from LLM output and parse as JSON.
     Handles trailing newlines after the closing fence.
     """
-    text = raw.strip()
+    text = (raw or "").strip()
 
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
 
-    if text.endswith("```"):
-        text = text[:-3]
+    candidates = [text]
 
-    text = text.strip()
+    obj_start = text.find("{")
+    obj_end = text.rfind("}")
+    if obj_start != -1 and obj_end != -1 and obj_end > obj_start:
+        candidates.append(text[obj_start:obj_end + 1].strip())
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        print(f"[parse_json] FAILED: {e}")
-        print(f"[parse_json] input was: {raw[:300]}")
-        raise
+    arr_start = text.find("[")
+    arr_end = text.rfind("]")
+    if arr_start != -1 and arr_end != -1 and arr_end > arr_start:
+        candidates.append(text[arr_start:arr_end + 1].strip())
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+
+    print("[parse_json] FAILED: unable to extract valid JSON")
+    print(f"[parse_json] input was: {raw[:300]}")
+    raise json.JSONDecodeError("Unable to parse JSON from model output", text, 0)
 
 
 # ── Model loading — once at startup ──────────────────────────────────────────
@@ -51,13 +60,7 @@ def load_embedder() -> SentenceTransformer:
 @lru_cache(maxsize=1)
 def load_nli() -> CrossEncoder:
     """
-    DeBERTa NLI — 142MB cross-encoder.
-    Layer 3 verification: checks quote actually proves the assigned competency.
-
-    predict() output shape: (n_pairs, 3)
-    Label order: [contradiction, entailment, neutral]
-    Index 1 = entailment logit.
-    Apply softmax before comparing to threshold.
+    DeBERTa NLI cross-encoder used for competency entailment checks.
     """
     return CrossEncoder("cross-encoder/nli-deberta-v3-small")
 
@@ -144,66 +147,71 @@ def semantic_match(
 
 
 def nli_match(
-    quote:          str,
+    quote: str,
     competency_key: str,
-    threshold:      float = 0.35,
+    threshold: float = 0.35,
+    competency_bank: dict[str, str] | None = None,
 ) -> tuple[bool, float]:
     """
     Layer 3 — NLI entailment using DeBERTa CrossEncoder.
-    Checks: does this quote actually prove this specific competency?
-
-    CrossEncoder.predict() returns raw logits shape (1, 3).
-    Label order: [contradiction, entailment, neutral] — index 1 is entailment.
-    Softmax applied to convert logits to probabilities before threshold comparison.
-
-    Threshold 0.35 is intentionally low — short spoken quotes produce
-    lower entailment scores than written text against long definitions.
-    Scores below 0.20 = clearly wrong competency assignment → hard drop.
+    Checks whether the quote supports the assigned competency definition.
 
     Returns (is_match, entailment_probability).
     """
-    definition = COMPETENCY_BANK.get(competency_key, "")
+    source_bank = competency_bank or {}
+    definition = source_bank.get(competency_key, "")
 
     if not definition:
-        # not in competency bank — CoT already validated it, let it pass
         return True, 1.0
 
     try:
-        model   = load_nli()
-        logits  = model.predict([(quote, definition[:200])])  # shape (1, 3)
+        model = load_nli()
+        logits = model.predict([(quote, definition[:200])])
 
-        # softmax: convert raw logits to probabilities that sum to 1
-        exp     = np.exp(logits[0] - np.max(logits[0]))  # subtract max for numerical stability
-        probs   = exp / exp.sum()
+        exp = np.exp(logits[0] - np.max(logits[0]))
+        probs = exp / exp.sum()
 
-        entailment = float(probs[1])  # index 1 = entailment
+        entailment_idx = 1
+        try:
+            label2id = getattr(model.model.config, "label2id", {}) or {}
+            for label, idx in label2id.items():
+                if "entail" in str(label).lower():
+                    entailment_idx = int(idx)
+                    break
+        except Exception:
+            pass
+
+        if entailment_idx < 0 or entailment_idx >= len(probs):
+            entailment_idx = 1
+
+        entailment = float(probs[entailment_idx])
 
         return entailment >= threshold, round(entailment, 3)
 
     except Exception as e:
         print(f"[nli_match] FAILED for '{competency_key}': {e}")
-        # on failure let it pass — quote existence already confirmed by L1/L2
         return True, 0.5
 
 
 # ── Combined verification gate ────────────────────────────────────────────────
 
 def verify_skill(
-    item:      dict,
+    item: dict,
     transcript: str,
-    sentences:  list[str],
-    s_embs:     any,
+    sentences: list[str],
+    s_embs: any,
+    competency_bank: dict[str, str] | None = None,
 ) -> bool:
     """
-    Three-layer verification gate for a detected soft skill.
+        Three-layer verification gate for a detected soft skill.
 
     Layer 1 — fuzzy string match     (fast, no model, always runs)
     Layer 2 — MiniLM semantic match  (only runs if Layer 1 fails)
-    Layer 3 — DeBERTa NLI entailment (runs once quote is confirmed)
+        Layer 3 — DeBERTa NLI entailment (runs once quote is confirmed)
 
     Accept when:
       - quote found in transcript by fuzzy OR semantic
-      - NLI entailment probability >= 0.20
+            - NLI entailment probability >= 0.20
 
     Logs result of each layer for debugging.
     """
@@ -223,9 +231,7 @@ def verify_skill(
             print(f"[Verify] DROP  '{name}' — not in transcript  sem={sem_score:.2f}")
             return False
 
-    # layer 3 — NLI competency check
-    nli_ok, nli_score = nli_match(quote, name)
-
+    nli_ok, nli_score = nli_match(quote, name, competency_bank=competency_bank)
     if nli_score < 0.20:
         print(f"[Verify] DROP  '{name}' — NLI={nli_score:.2f} wrong competency")
         return False

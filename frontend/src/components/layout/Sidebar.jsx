@@ -3,7 +3,7 @@ import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Mic,
-  ChevronLeft, ChevronRight, Sparkles,
+  ChevronLeft, ChevronRight, Sparkles, Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,7 @@ const NAV = [
   { to: "/",           icon: LayoutDashboard, label: "Dashboard"  },
   { to: "/jobs",       icon: Briefcase,       label: "Jobs"        },
   { to: "/interviews", icon: Mic,             label: "Interviews"  },
+  { to: "/softskills", icon: Brain,           label: "Soft Skills" },
 ];
 
 export default function Sidebar() {
@@ -19,7 +20,7 @@ export default function Sidebar() {
   return (
     <aside className={cn(
       "h-screen flex flex-col bg-slate-900 border-r border-slate-800 shrink-0 transition-all duration-200",
-      collapsed ? "w-[60px]" : "w-[220px]"
+      collapsed ? "w-15" : "w-55"
     )}>
 
       {/* Logo */}

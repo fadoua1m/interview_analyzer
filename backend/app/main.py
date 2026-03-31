@@ -5,16 +5,16 @@ from app.config import settings
 from app.routes.job_description import router as jobs_router
 from app.routes.interview       import router as interviews_router
 from app.routes.analysis        import router as analysis_router
+from app.routes.softskills      import router as softskills_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import sys
-    from app.analysis_pipeline.text.helpers import load_embedder, load_nli
+    from app.analysis_pipeline.text.helpers import load_embedder
 
     print("[Startup] Loading text models...")
     load_embedder()
-    load_nli()
 
     print("[Startup] Loading video models...")
     try:
@@ -41,3 +41,4 @@ app.add_middleware(
 app.include_router(jobs_router,       prefix="/api/v1")
 app.include_router(interviews_router, prefix="/api/v1")
 app.include_router(analysis_router,   prefix="/api/v1")
+app.include_router(softskills_router, prefix="/api/v1")

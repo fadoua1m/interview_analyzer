@@ -21,23 +21,12 @@ AU_NAMES = [
     "AU20", "AU23", "AU25", "AU26", "AU28", "AU45",
 ]
 
-NOISE_FLOOR = 0.05
-
-EMOTION_DAMPENING = {
-    "contempt": 0.05,
-    "disgust":  0.10,
-    "anger":    0.30,
-    "fear":     0.40,
-    "surprise": 0.40,
-}
-
-
 @lru_cache(maxsize=1)
 def _load_models():
-    video_dir     = Path(__file__).resolve().parent
-    weights       = video_dir / "weights"
+    video_dir = Path(__file__).resolve().parent
+    weights = Path(settings.openface_weights_dir) if settings.openface_weights_dir else (video_dir / "weights")
     original_argv = sys.argv[:]
-    original_cwd  = Path.cwd()
+    original_cwd = Path.cwd()
 
     try:
         sys.argv = [sys.argv[0]]
@@ -78,11 +67,14 @@ def analyse_frame(frame: np.ndarray) -> dict | None:
         emotion_logits, gaze_output, au_output = predictor.predict(cropped_face)
 
         probs = torch.softmax(emotion_logits, dim=1)[0].detach().cpu().numpy().copy()
+        noise_floor = settings.video_emotion_noise_floor
+        dampening = settings.video_emotion_dampening
+
         for i, label in enumerate(EMOTION_INDEX):
-            if probs[i] < NOISE_FLOOR:
+            if probs[i] < noise_floor:
                 probs[i] = 0.0
-            if label in EMOTION_DAMPENING:
-                probs[i] *= EMOTION_DAMPENING[label]
+            if label in dampening:
+                probs[i] *= float(dampening[label])
         total = probs.sum()
         if total > 0:
             probs /= total

@@ -33,11 +33,13 @@ class InterviewCreate(BaseModel):
     type:   InterviewType
     title:  str
     notes:  Optional[str] = None
+    target_softskills: List[str] = Field(default_factory=list)
 
 class InterviewUpdate(BaseModel):
     type:  Optional[InterviewType] = None
     title: Optional[str]           = None
     notes: Optional[str]           = None
+    target_softskills: Optional[List[str]] = None
 
 class InterviewResponse(BaseModel):
     id:         str
@@ -45,6 +47,7 @@ class InterviewResponse(BaseModel):
     type:       InterviewType
     title:      str
     notes:      Optional[str]      = None
+    target_softskills: List[str]   = Field(default_factory=list)
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -89,3 +92,44 @@ class EnhanceRubricRequest(BaseModel):
     interview_type:  str
     seniority_level: str
     title:           str
+
+
+class CandidateAssignCreate(BaseModel):
+    name: str
+    email: str
+
+
+class CandidateAssignmentResponse(BaseModel):
+    id: str
+    interview_id: str
+    name: str
+    email: str
+    status: str
+    access_token: str
+    submitted_at: Optional[datetime] = None
+    created_at: datetime
+    analysis_payload: Optional[dict] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CandidateAccessQuestion(BaseModel):
+    id: str
+    question: str
+    order_index: int
+
+
+class CandidateAccessResponse(BaseModel):
+    assignment_id: str
+    interview_id: str
+    interview_title: str
+    candidate_name: str
+    status: str
+    questions: List[CandidateAccessQuestion] = Field(default_factory=list)
+
+
+class CandidateSubmissionResponse(BaseModel):
+    assignment_id: str
+    status: str
+    analysis: dict

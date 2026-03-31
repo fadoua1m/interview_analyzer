@@ -1,13 +1,15 @@
 // src/pages/interviews/InterviewDetail.jsx
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   useInterview, useCreateInterview, useUpdateInterview,
   useCreateQuestion, useUpdateQuestion, useDeleteQuestion,
   useGenerateQuestions, useEnhanceQuestion,
   useGenerateRubric, useEnhanceRubric,
+  useInterviewCandidates, useAssignCandidate, useCandidateReport,
 } from "../../hooks/useInterviews";
 import { useJobs } from "../../hooks/useJobs";
+import { useSoftskillsBank } from "../../hooks/useSoftskills";
 import { Button }   from "@/components/ui/button";
 import { Input }    from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,7 +21,15 @@ import {
   Code2, Users, Briefcase, Layers,
   ChevronDown, Sparkles, Loader2,
   RefreshCw, AlertCircle, BookOpen, Wand2,
+  Copy, Link2, UserRound, FileText,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { cn }    from "@/lib/utils";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -186,7 +196,7 @@ function CreateInterviewForm({ jobId, jobTitle }) {
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="outline" size="sm" onClick={() => navigate(-1)}>Cancel</Button>
           <Button size="sm" onClick={handleSubmit} disabled={createInterview.isPending}
-            className="bg-slate-900 hover:bg-slate-700 text-white min-w-[130px]">
+            className="bg-slate-900 hover:bg-slate-700 text-white min-w-32.5">
             {createInterview.isPending ? "Creating…" : "Create Interview"}
           </Button>
         </div>
@@ -234,7 +244,7 @@ function GenerateQuestionsPanel({ interview, job, onClose }) {
   };
 
   return (
-    <div className="border-t border-slate-100 bg-gradient-to-b from-slate-50/80 to-white">
+    <div className="border-t border-slate-100 bg-linear-to-b from-slate-50/80 to-white">
 
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
         <div className="flex items-center gap-2">
@@ -563,9 +573,19 @@ function QuestionRow({ question, interview, job, interviewId, index }) {
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-slate-400 italic">
-                No rubric yet — generate one with AI or write manually.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs text-slate-400 italic">
+                  No rubric yet — generate one with AI or write manually.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-[10px]"
+                  onClick={() => setEditingRubric(true)}
+                >
+                  Write rubric
+                </Button>
+              </div>
             )}
           </div>
         </div>
@@ -577,13 +597,19 @@ function QuestionRow({ question, interview, job, interviewId, index }) {
 // ── Add question inline form ─────────────────────────────────────────────────
 function AddQuestionForm({ interviewId, onDone }) {
   const [text, setText] = useState("");
+  const [rubric, setRubric] = useState("");
   const createQ         = useCreateQuestion(interviewId);
 
   const handleAdd = async () => {
     if (!text.trim()) return;
     try {
-      await createQ.mutateAsync({ question: text, order_index: 0 });
+      await createQ.mutateAsync({
+        question: text,
+        order_index: 0,
+        rubric: rubric.trim() || null,
+      });
       setText("");
+      setRubric("");
       toast.success("Question added");
       onDone?.();
     } catch { toast.error("Failed to add question"); }
@@ -596,9 +622,16 @@ function AddQuestionForm({ interviewId, onDone }) {
         className="text-sm resize-none bg-white" autoFocus
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleAdd(); }}
       />
+      <Textarea
+        placeholder="Optional rubric (you can also generate/enhance later with AI)"
+        rows={3}
+        value={rubric}
+        onChange={(e) => setRubric(e.target.value)}
+        className="text-xs resize-none bg-white"
+      />
       <div className="flex justify-end gap-1.5">
         <Button variant="outline" size="sm" className="h-7 text-xs"
-          onClick={() => { setText(""); onDone?.(); }}>
+          onClick={() => { setText(""); setRubric(""); onDone?.(); }}>
           Cancel
         </Button>
         <Button size="sm" onClick={handleAdd}
@@ -608,6 +641,313 @@ function AddQuestionForm({ interviewId, onDone }) {
           {createQ.isPending ? "Adding…" : "Add Question"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+
+function CandidateAssignmentsPanel({ interviewId, disabled }) {
+  const { data: candidates = [], isLoading } = useInterviewCandidates(interviewId);
+  const assignCandidate = useAssignCandidate(interviewId);
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const { data: report, isLoading: loadingReport } = useCandidateReport(
+    interviewId,
+    selectedCandidate?.id,
+    reportOpen && !!selectedCandidate?.id
+  );
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+
+  const handleAssign = async () => {
+    if (!name.trim() || !email.trim()) {
+      toast.error("Candidate name and email are required.");
+      return;
+    }
+    try {
+      await assignCandidate.mutateAsync({ name: name.trim(), email: email.trim() });
+      setName("");
+      setEmail("");
+      toast.success("Candidate assigned successfully.");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Failed to assign candidate.");
+    }
+  };
+
+  const copyLink = async (token) => {
+    const link = `${window.location.origin}/candidate/${token}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success("Candidate link copied.");
+    } catch {
+      toast.error("Failed to copy candidate link.");
+    }
+  };
+
+  const openReport = (candidate) => {
+    setSelectedCandidate(candidate);
+    setReportOpen(true);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100">
+        <h2 className="text-sm font-semibold text-slate-900">Candidates & Submissions</h2>
+        <p className="text-xs text-slate-400 mt-0.5">
+          Assign candidates, collect their video submissions, and review processed reports.
+        </p>
+      </div>
+
+      <div className="px-5 py-4 border-b border-slate-100 space-y-3 bg-slate-50/60">
+        {disabled && (
+          <p className="text-[11px] text-amber-600">
+            Add interview questions first before assigning candidates.
+          </p>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Candidate full name"
+            disabled={disabled || assignCandidate.isPending}
+            className="h-9 text-sm"
+          />
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="candidate@email.com"
+            disabled={disabled || assignCandidate.isPending}
+            className="h-9 text-sm"
+          />
+        </div>
+        <Button
+          size="sm"
+          onClick={handleAssign}
+          disabled={disabled || assignCandidate.isPending}
+          className="bg-slate-900 hover:bg-slate-700 text-white h-8 text-xs gap-1.5"
+        >
+          <UserRound className="w-3.5 h-3.5" />
+          {assignCandidate.isPending ? "Assigning…" : "Assign Candidate"}
+        </Button>
+      </div>
+
+      <div className="p-5 space-y-3">
+        {isLoading ? (
+          <p className="text-xs text-slate-400">Loading candidates…</p>
+        ) : candidates.length === 0 ? (
+          <p className="text-xs text-slate-400">No candidates assigned yet.</p>
+        ) : (
+          candidates.map((candidate) => {
+            const report = candidate.analysis_payload || null;
+            return (
+              <div key={candidate.id} className="rounded-xl border border-slate-200 p-3 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">{candidate.name}</p>
+                    <p className="text-xs text-slate-500">{candidate.email}</p>
+                  </div>
+                  <span className={cn(
+                    "text-[10px] px-2 py-1 rounded-full border font-semibold uppercase tracking-wide",
+                    candidate.status === "processed" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+                    candidate.status === "submitted" && "border-blue-200 bg-blue-50 text-blue-700",
+                    candidate.status === "failed" && "border-red-200 bg-red-50 text-red-700",
+                    candidate.status === "assigned" && "border-slate-200 bg-slate-50 text-slate-600"
+                  )}>
+                    {candidate.status}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px] gap-1"
+                    onClick={() => copyLink(candidate.access_token)}
+                  >
+                    <Copy className="w-3 h-3" />
+                    Copy Candidate Link
+                  </Button>
+                  <a
+                    href={`${window.location.origin}/candidate/${candidate.access_token}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-700"
+                  >
+                    <Link2 className="w-3 h-3" />
+                    Open link
+                  </a>
+                  {candidate.status === "processed" && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px] gap-1"
+                      onClick={() => openReport(candidate)}
+                    >
+                      <FileText className="w-3 h-3" />
+                      Open Full Report
+                    </Button>
+                  )}
+                </div>
+
+                {report && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                    <div className="flex items-center gap-3 text-xs text-slate-600">
+                      <span className="font-semibold text-slate-800">Decision: {report.decision || "REVIEW"}</span>
+                      <span>Score: {report.overall_score ?? 0}</span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                      {report.hr_summary || "Report generated successfully."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="sm:max-w-190 max-h-[86vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Candidate Full Report</DialogTitle>
+            <DialogDescription>
+              {selectedCandidate ? `${selectedCandidate.name} · ${selectedCandidate.email}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          {loadingReport ? (
+            <div className="space-y-2">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-48 w-full" />
+            </div>
+          ) : !report ? (
+            <p className="text-sm text-slate-500">Report is not available yet.</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Hiring Decision</p>
+                  <p className="text-sm font-semibold text-slate-900">{report.decision}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Overall Fit Score</p>
+                  <p className="text-sm font-semibold text-slate-900">{report.overall_score}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Interview Reference</p>
+                  <p className="text-sm font-semibold text-slate-900 truncate">{report.interview_id}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Questions Evaluated</p>
+                  <p className="text-sm font-semibold text-slate-900">{report.qa_pairs_count ?? 0}</p>
+                </div>
+              </div>
+
+              {(() => {
+                const relevanceReason = (report.decision_reasons || []).find((reason) => {
+                  const text = String(reason || "").toLowerCase();
+                  return (
+                    text.includes("relevance") ||
+                    text.includes("answered") ||
+                    text.includes("mismatch") ||
+                    text.includes("question-answer") ||
+                    text.includes("responses were not relevant")
+                  );
+                });
+
+                if (!relevanceReason) return null;
+
+                return (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-xs font-semibold text-amber-800">Relevance & Coverage</p>
+                    <p className="mt-1 text-sm text-amber-900">{relevanceReason}</p>
+                  </div>
+                );
+              })()}
+
+              <div className="rounded-xl border border-slate-200 p-3">
+                <p className="text-xs font-semibold text-slate-700">Decision Reasons</p>
+                <ul className="mt-2 list-disc pl-5 space-y-1 text-sm text-slate-700">
+                  {(report.decision_reasons || []).map((reason, index) => (
+                    <li key={index}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-3">
+                <p className="text-xs font-semibold text-slate-700">HR Summary</p>
+                <p className="mt-1 text-sm text-slate-700 leading-relaxed">{report.hr_summary}</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-700">Visual Signals (Video)</p>
+                  <p className="text-xs text-slate-600">Attention: {report.hr_view?.video_profile?.attention_level || "-"}</p>
+                  <p className="text-xs text-slate-600">Composure: {report.hr_view?.video_profile?.composure_level || "-"}</p>
+                  <p className="text-xs text-slate-600">Integrity risk: {report.hr_view?.video_profile?.integrity_risk || "-"}</p>
+                  <p className="text-xs text-slate-600">Reliability: {report.hr_view?.video_profile?.reliability_status || "-"}</p>
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-700">Key observations</p>
+                    <ul className="mt-1 list-disc pl-4 space-y-1 text-xs text-slate-600">
+                      {(report.hr_view?.video_profile?.key_observations || []).map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-700">Voice Signals (Audio)</p>
+                  <p className="text-xs text-slate-600">Confidence: {report.hr_view?.audio_profile?.confidence_level || "-"}</p>
+                  <p className="text-xs text-slate-600">Clarity: {report.hr_view?.audio_profile?.communication_clarity || "-"}</p>
+                  <p className="text-xs text-slate-600">Response quality: {report.hr_view?.audio_profile?.response_quality ?? "-"}</p>
+                  <p className="text-xs text-slate-600">Stress indicators: {report.hr_view?.audio_profile?.stress_indicators || "-"}</p>
+                  <p className="text-xs text-slate-600">Audio clarity: {report.hr_view?.audio_profile?.professionalism_signals?.audio_clarity || "-"}</p>
+                  <p className="text-xs text-slate-600">Environment: {report.hr_view?.audio_profile?.professionalism_signals?.environment_quality || "-"}</p>
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-700">Key observations</p>
+                    <ul className="mt-1 list-disc pl-4 space-y-1 text-xs text-slate-600">
+                      {(report.hr_view?.audio_profile?.key_observations || []).map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-700">Content Signals (Text)</p>
+                  <p className="text-xs text-slate-600">Relevance score: {report.hr_view?.text_profile?.relevance_score ?? "-"}/10</p>
+                  <p className="text-xs text-slate-600">Soft skills detected: {(report.hr_view?.text_profile?.softskills || []).length}</p>
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-700">Key observations</p>
+                    <ul className="mt-1 list-disc pl-4 space-y-1 text-xs text-slate-600">
+                      {(report.hr_view?.text_profile?.key_observations || []).map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                <p className="text-xs font-semibold text-slate-700">Soft Skills Evidence (Content)</p>
+                <div className="mt-1 space-y-2">
+                  {(report.hr_view?.text_profile?.softskills || []).map((skill, idx) => (
+                    <div key={idx} className="rounded-lg border border-slate-200 p-2.5">
+                      <p className="text-sm font-medium text-slate-900">{skill.name} · {skill.strength}</p>
+                      {skill.quote ? <p className="text-xs text-slate-600 mt-1">“{skill.quote}”</p> : null}
+                      <p className="text-xs text-slate-500 mt-1">{skill.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -629,9 +969,43 @@ export default function InterviewDetail() {
 
   const { data: interview, isLoading, isError } = useInterview(isNew ? null : id);
   const { data: jobs = [] } = useJobs();
+  const { data: bankSkills = [] } = useSoftskillsBank({ active: true });
   const updateInterview = useUpdateInterview();
 
   const job = interview ? jobs.find((j) => j.id === interview.job_id) : null;
+
+  const availableSkills = useMemo(() => {
+    const byKey = new Map();
+    for (const item of bankSkills || []) {
+      if (!item?.key) continue;
+      const existing = byKey.get(item.key);
+      if (!existing || item.language === "en") {
+        byKey.set(item.key, item);
+      }
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.key.localeCompare(b.key));
+  }, [bankSkills]);
+
+  const selectedTargetSkills = interview?.target_softskills || [];
+  const hasQuestions = (interview?.questions?.length || 0) > 0;
+
+  const toggleInterviewTargetSkill = async (key) => {
+    if (!hasQuestions) {
+      toast.error("Add interview questions first, then select target soft skills.");
+      return;
+    }
+    const hasSkill = selectedTargetSkills.includes(key);
+    const updatedSkills = hasSkill
+      ? selectedTargetSkills.filter((skill) => skill !== key)
+      : [...selectedTargetSkills, key];
+
+    try {
+      await updateInterview.mutateAsync({ id, data: { target_softskills: updatedSkills } });
+      toast.success("Interview target soft skills updated");
+    } catch {
+      toast.error("Failed to update interview target soft skills");
+    }
+  };
 
   const saveTitle = async () => {
     if (!titleText.trim()) return;
@@ -754,6 +1128,53 @@ export default function InterviewDetail() {
             {interview.notes && (
               <p className="text-sm text-slate-500 mt-2 leading-relaxed">{interview.notes}</p>
             )}
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-slate-700">Interview Target Soft Skills</p>
+                <span className="text-[11px] text-slate-500">
+                  {selectedTargetSkills.length} selected
+                </span>
+              </div>
+
+              {!hasQuestions && (
+                <p className="text-[11px] text-amber-600">
+                  Create questions (and rubric if needed) first, then select interview target soft skills.
+                </p>
+              )}
+
+              {availableSkills.length === 0 ? (
+                <p className="text-xs text-slate-400">No active soft skills found in bank.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {availableSkills.map((skill) => {
+                    const selected = selectedTargetSkills.includes(skill.key);
+                    return (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        onClick={() => toggleInterviewTargetSkill(skill.key)}
+                        className={cn(
+                          "rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                          !hasQuestions && "opacity-50 cursor-not-allowed",
+                          selected
+                            ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                        )}
+                        disabled={!hasQuestions}
+                        title={skill.description}
+                      >
+                        {skill.display_name || skill.key}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <p className="text-[10px] text-slate-400">
+                These skills will be prioritized during transcript soft-skill verification.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -839,6 +1260,8 @@ export default function InterviewDetail() {
           <AddQuestionForm interviewId={id} onDone={() => setShowAdd(false)} />
         )}
       </div>
+
+      <CandidateAssignmentsPanel interviewId={id} disabled={!hasQuestions} />
     </div>
   );
 }

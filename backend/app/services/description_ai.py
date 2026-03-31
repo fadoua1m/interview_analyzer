@@ -1,6 +1,6 @@
 # app/services/description_ai.py
 """AI enhancements for job descriptions and requirements."""
-from app.services.gemini_client import generate
+from app.services.groq_client import generate
 
 
 def enhance_description(title: str, company: str, description: str) -> str:
